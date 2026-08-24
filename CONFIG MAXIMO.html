@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Máximo Drums - Console Pro</title>
+  <style>
+    :root {
+      --bg: #121214;
+      --card-bg: #202024;
+      --primary: #00e676;
+      --accent: #ff0055;
+      --text: #e1e1e6;
+      --border: #29292e;
+      --input-bg: #18181b;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      padding: 15px 20px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .controls-group { 
+      display: flex; 
+      gap: 10px; 
+      align-items: center; 
+      flex-wrap: wrap;
+    }
+
+    button, select, input {
+      background: #29292e;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    button { 
+      cursor: pointer; 
+      transition: 0.2s; 
+    }
+    button:hover { background: #323238; }
+    button.connected { background: var(--primary); color: #000; }
+
+    .btn-action { background: #323238; border-color: #444; }
+    .btn-action:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-autocal { width: 100%; margin-top: 6px; background: transparent; border: 1px solid var(--primary); color: var(--primary); font-size: 0.8rem; }
+    .btn-autocal:hover { background: var(--primary); color: #000; }
+
+    .hh-global-box {
+      background: #18181b;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .hh-global-box div {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 15px;
+    }
+
+    .pad-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 15px;
+      transition: border-color 0.1s, box-shadow 0.1s;
+    }
+
+    .pad-card.active {
+      border-color: var(--primary);
+      box-shadow: 0 0 12px rgba(0, 230, 118, 0.4);
+    }
+
+    .pad-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 10px;
+    }
+
+    .pad-title-input {
+      background: var(--input-bg);
+      color: var(--primary);
+      border: 1px solid var(--border);
+      font-size: 1.05rem;
+      font-weight: bold;
+      width: 100%;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .param-group { margin-bottom: 10px; }
+    .param-group label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+    }
+
+    input[type="range"] { width: 100%; box-sizing: border-box; }
+    input[type="number"] { width: 100%; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h2>Máximo Drums - Pro Console</h2>
+    <div class="controls-group">
+      <button id="btnConnect">CONECTAR USB</button>
+      <select id="midiOutSelect">
+        <option value="">Selecione a Porta MIDI...</option>
+      </select>
+      <button class="btn-action" onclick="exportConfig()">💾 Exportar</button>
+      <button class="btn-action" onclick="document.getElementById('importFile').click()">📂 Importar</button>
+      <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importConfig(event)">
+    </div>
+  </header>
+
+  <!-- Configuração Global do Chimbal (Piezo no GPIO 12 / Botão no GPIO 13) -->
+  <div class="hh-global-box">
+    <h4 style="margin:0; width: 100%; color: var(--accent);">CONFIGURAÇÃO CHIMBAL (PIEZO: GPIO 12 | PEDAL: GPIO 13)</h4>
+    <div>
+      <label style="font-size: 0.85rem;">Aberto (Open - Batida):</label>
+      <input type="number" id="hh-open" min="0" max="127" value="46" onchange="updateHH('open', this.value)">
+    </div>
+    <div>
+      <label style="font-size: 0.85rem;">Fechado (Closed - Batida):</label>
+      <input type="number" id="hh-close" min="0" max="127" value="42" onchange="updateHH('close', this.value)">
+    </div>
+    <div>
+      <label style="font-size: 0.85rem;">Pisada (Foot Close):</label>
+      <input type="number" id="hh-foot" min="0" max="127" value="44" onchange="updateHH('foot', this.value)">
+    </div>
+  </div>
+
+  <div class="grid" id="padsGrid"></div>
+
+  <script>
+    const defaultNotes = [36, 38, 48, 45, 43, 41, 49, 57, 51, 55, 39, 46];
+    const padNames = ["Bumbo", "Caixa", "Tom 1", "Tom 2", "Tom 3", "Surdo", "Ataque 1", "Ataque 2", "Condução", "Splash/China", "Palma/Clap", "Chimbal"];
+
+    let port, writer, reader;
+    let midiOutput = null;
+
+    // Estado local para salvar e carregar preferências
+    let configData = {
+      hh: { open: 46, close: 42, foot: 44 },
+      pads: Array.from({ length: 12 }, (_, i) => ({
+        name: padNames[i],
+        note: defaultNotes[i],
+        th: 450,
+        gn: 5,
+        rt: 30,
+        cv: 0
+      }))
+    };
+
+    // Carrega a configuração salva no navegador se existir
+    function loadSavedState() {
+      const saved = localStorage.getItem('maximoDrumsConfig');
+      if (saved) {
+        try {
+          configData = JSON.parse(saved);
+        } catch (e) { console.error("Erro ao ler dados do localStorage:", e); }
+      }
+    }
+
+    function saveState() {
+      localStorage.setItem('maximoDrumsConfig', JSON.stringify(configData));
+    }
+
+    loadSavedState();
+
+    const grid = document.getElementById('padsGrid');
+    
+    // Constrói os cards dos 12 Pads com os valores restaurados
+    for (let i = 0; i < 12; i++) {
+      const pad = configData.pads[i];
+      const card = document.createElement('div');
+      card.className = 'pad-card';
+      card.id = `pad-${i}`;
+      card.innerHTML = `
+        <div class="pad-header">
+          <input type="text" class="pad-title-input" value="${pad.name}" onchange="updatePadName(${i}, this.value)">
+        </div>
+        <div class="param-group">
+          <label>Nota MIDI: <span id="val-na-${i}">${pad.note}</span></label>
+          <input type="number" id="input-na-${i}" min="0" max="127" value="${pad.note}" onchange="sendParam(${i}, 'NA', this.value)">
+        </div>
+        <div class="param-group">
+          <label>Sensibilidade (TH): <span id="val-th-${i}">${pad.th}</span></label>
+          <input type="range" id="input-th-${i}" min="100" max="2000" value="${pad.th}" onchange="sendParam(${i}, 'TH', this.value)" oninput="document.getElementById('val-th-${i}').innerText=this.value">
+        </div>
+        <div class="param-group">
+          <label>Ganho (GN): <span id="val-gn-${i}">${pad.gn}</span></label>
+          <input type="range" id="input-gn-${i}" min="1" max="20" value="${pad.gn}" onchange="sendParam(${i}, 'GN', this.value)" oninput="document.getElementById('val-gn-${i}').innerText=this.value">
+        </div>
+        <div class="param-group">
+          <label>Retrigger / Mask (RT): <span id="val-rt-${i}">${pad.rt}</span>ms</label>
+          <input type="range" id="input-rt-${i}" min="10" max="150" value="${pad.rt}" onchange="sendParam(${i}, 'RT', this.value)" oninput="document.getElementById('val-rt-${i}').innerText=this.value">
+        </div>
+        <div class="param-group">
+          <label>Curva Dinâmica:</label>
+          <select id="input-cv-${i}" style="width:100%;" onchange="sendParam(${i}, 'CV', this.value)">
+            <option value="0" ${pad.cv == 0 ? 'selected' : ''}>0 - Linear</option>
+            <option value="1" ${pad.cv == 1 ? 'selected' : ''}>1 - Logarítmica</option>
+            <option value="2" ${pad.cv == 2 ? 'selected' : ''}>2 - Exponencial</option>
+          </select>
+        </div>
+        <button class="btn-autocal" onclick="autoCalibrate(${i})">⚡ AUTO CALIBRE</button>
+      `;
+      grid.appendChild(card);
+    }
+
+    // Restaura campos do Chimbal
+    document.getElementById('hh-open').value = configData.hh.open;
+    document.getElementById('hh-close').value = configData.hh.close;
+    document.getElementById('hh-foot').value = configData.hh.foot;
+
+    // Funções de atualização do Chimbal
+    function updateHH(type, val) {
+      configData.hh[type] = parseInt(val);
+      saveState();
+      const codeMap = { open: 'HHO', close: 'HHC', foot: 'HHF' };
+      if (writer) writer.write(`SET:11:${codeMap[type]}:${val}\n`);
+    }
+
+    // Atualiza nome do pad
+    function updatePadName(pad, val) {
+      configData.pads[pad].name = val;
+      saveState();
+    }
+
+    // Auto calibre por pad
+    function autoCalibrate(pad) {
+      const defaultTH = 350;
+      const defaultGN = 5;
+      const defaultRT = 20;
+
+      sendParam(pad, 'TH', defaultTH);
+      sendParam(pad, 'GN', defaultGN);
+      sendParam(pad, 'RT', defaultRT);
+
+      document.getElementById(`input-th-${pad}`).value = defaultTH;
+      document.getElementById(`val-th-${pad}`).innerText = defaultTH;
+
+      document.getElementById(`input-gn-${pad}`).value = defaultGN;
+      document.getElementById(`val-gn-${pad}`).innerText = defaultGN;
+
+      document.getElementById(`input-rt-${pad}`).value = defaultRT;
+      document.getElementById(`val-rt-${pad}`).innerText = defaultRT;
+    }
+
+    // Exporta arquivo JSON
+    function exportConfig() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(configData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "maximo_drums_config.json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    // Importa arquivo JSON
+    function importConfig(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (imported.pads && imported.hh) {
+            configData = imported;
+            saveState();
+            location.reload(); // Recarrega para aplicar a interface atualizada
+          } else {
+            alert("Arquivo JSON inválido!");
+          }
+        } catch (err) {
+          alert("Erro ao ler o arquivo JSON.");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Inicialização da Web MIDI API
+    if (navigator.requestMIDIAccess) {
+      navigator.requestMIDIAccess().then(midiAccess => {
+        const select = document.getElementById('midiOutSelect');
+        for (let output of midiAccess.outputs.values()) {
+          const opt = document.createElement('option');
+          opt.value = output.id;
+          opt.innerText = output.name;
+          select.appendChild(opt);
+        }
+        select.onchange = () => midiOutput = midiAccess.outputs.get(select.value);
+      });
+    }
+
+    // Conexão Web Serial USB
+    document.getElementById('btnConnect').addEventListener('click', async () => {
+      if (port) {
+        await port.close();
+        port = null;
+        document.getElementById('btnConnect').innerText = "CONECTAR USB";
+        document.getElementById('btnConnect').classList.remove('connected');
+        return;
+      }
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+
+        const textEncoder = new TextEncoderStream();
+        textEncoder.readable.pipeTo(port.writable);
+        writer = textEncoder.writable.getWriter();
+
+        document.getElementById('btnConnect').innerText = "CONECTADO";
+        document.getElementById('btnConnect').classList.add('connected');
+        
+        // Envia todas as configurações salvas para o ESP32 ao conectar
+        syncAllParamsToESP();
+        readSerialData();
+      } catch (err) {
+        alert("Erro ao conectar porta Serial: " + err);
+      }
+    });
+
+    // Sincroniza todas as configs ao conectar USB
+    async function syncAllParamsToESP() {
+      if (!writer) return;
+      for (let i = 0; i < 12; i++) {
+        const p = configData.pads[i];
+        await writer.write(`SET:${i}:NA:${p.note}\n`);
+        await writer.write(`SET:${i}:TH:${p.th}\n`);
+        await writer.write(`SET:${i}:GN:${p.gn}\n`);
+        await writer.write(`SET:${i}:RT:${p.rt}\n`);
+        await writer.write(`SET:${i}:CV:${p.cv}\n`);
+      }
+      await writer.write(`SET:11:HHO:${configData.hh.open}\n`);
+      await writer.write(`SET:11:HHC:${configData.hh.close}\n`);
+      await writer.write(`SET:11:HHF:${configData.hh.foot}\n`);
+    }
+
+    // Envio de parâmetros para o ESP32 (Formato SET:PAD:TIPO:VALOR)
+    async function sendParam(pad, type, val) {
+      const numVal = parseInt(val);
+      if (type === 'NA') {
+        document.getElementById(`val-na-${pad}`).innerText = val;
+        configData.pads[pad].note = numVal;
+      } else if (type === 'TH') {
+        configData.pads[pad].th = numVal;
+      } else if (type === 'GN') {
+        configData.pads[pad].gn = numVal;
+      } else if (type === 'RT') {
+        configData.pads[pad].rt = numVal;
+      } else if (type === 'CV') {
+        configData.pads[pad].cv = numVal;
+      }
+      
+      saveState();
+
+      if (writer) {
+        await writer.write(`SET:${pad}:${type}:${val}\n`);
+      }
+    }
+
+    // Leitura das mensagens seriais vindas do ESP32
+    async function readSerialData() {
+      const textDecoder = new TextDecoderStream();
+      port.readable.pipeTo(textDecoder.writable);
+      reader = textDecoder.readable.getReader();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        let lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (let line of lines) {
+          processMessage(line.trim());
+        }
+      }
+    }
+
+    // Trata retornos no formato HIT:PAD:VELOCITY:NOTA
+    function processMessage(msg) {
+      if (msg.startsWith("HIT:")) {
+        const parts = msg.split(":");
+        if (parts.length === 4) {
+          const padIndex = parseInt(parts[1]);
+          const velocity = parseInt(parts[2]);
+          const midiNote = parseInt(parts[3]);
+
+          triggerPadUI(padIndex);
+
+          // Disparo MIDI Note-On no Canal 10 (0x99)
+          if (midiOutput) {
+            midiOutput.send([0x99, midiNote, velocity]);
+            setTimeout(() => midiOutput.send([0x89, midiNote, 0]), 80); // Note-Off
+          }
+        }
+      }
+    }
+
+    // Feedback visual nos cards
+    function triggerPadUI(padIndex) {
+      const card = document.getElementById(`pad-${padIndex}`);
+      if (card) {
+        card.classList.add('active');
+        setTimeout(() => card.classList.remove('active'), 100);
+      }
+    }
+  </script>
+</body>
+</html>
